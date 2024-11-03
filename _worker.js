@@ -1,4 +1,4 @@
-export default {
+﻿export default {
   async fetch(request, env) {
     const { pathname } = new URL(request.url);
     const domain = env.DOMAIN;
@@ -55,7 +55,7 @@ async function handleRootRequest(request, USERNAME, PASSWORD, enableAuth) {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="馒头图床">
   <meta name="keywords" content="馒头图床">
-  <title>馒头VIP图床</title>
+  <title>馒头图床</title>
   <link rel="icon" href="https://p1.meituan.net/csc/c195ee91001e783f39f41ffffbbcbd484286.ico" type="image/x-icon">
   <link href="https://lf3-cdn-tos.bytecdntp.com/cdn/expire-1-M/twitter-bootstrap/4.6.1/css/bootstrap.min.css" rel="stylesheet" />
   <link href="https://lf26-cdn-tos.bytecdntp.com/cdn/expire-1-M/bootstrap-fileinput/5.2.7/css/fileinput.min.css" rel="stylesheet" />
@@ -148,7 +148,7 @@ async function handleRootRequest(request, USERNAME, PASSWORD, enableAuth) {
 <body>
   <div class="background" id="background"></div>
   <div class="card">
-      <div class="title">馒头VIP图床</div>
+      <div class="title">馒头图床</div>
       <button type="button" class="btn" id="viewCacheBtn" title="查看历史记录"><i class="fas fa-clock"></i></button>
       <div class="card-body">
           <form id="uploadForm" action="/upload" method="post" enctype="multipart/form-data">
@@ -166,7 +166,7 @@ async function handleRootRequest(request, USERNAME, PASSWORD, enableAuth) {
               <div id="cacheContent" style="display: none;"></div>
           </form>
       </div>
-      <p class="project-link"><a href="https://mr.mt/" target="_blank" rel="noopener noreferrer">馒头VIP图床</a></p>
+      <p class="project-link">馒头论坛 - <a href="https://mr.mt" target="_blank" rel="noopener noreferrer">mr.mt</a></p>
       <script src="https://lf3-cdn-tos.bytecdntp.com/cdn/expire-1-M/jquery/3.6.0/jquery.min.js" type="application/javascript"></script>
       <script src="https://lf26-cdn-tos.bytecdntp.com/cdn/expire-1-M/bootstrap-fileinput/5.2.7/js/fileinput.min.js" type="application/javascript"></script>
       <script src="https://lf26-cdn-tos.bytecdntp.com/cdn/expire-1-M/bootstrap-fileinput/5.2.7/js/locales/zh.min.js" type="application/javascript"></script>
@@ -484,7 +484,7 @@ async function generateAdminPage(DATABASE) {
   <!DOCTYPE html>
   <html>
     <head>
-      <title>图库</title>
+      <title>馒头图库</title>
       <link rel="icon" href="https://p1.meituan.net/csc/c195ee91001e783f39f41ffffbbcbd484286.ico" type="image/x-icon">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <style>
@@ -695,20 +695,13 @@ async function generateAdminPage(DATABASE) {
 }
 
 async function fetchMediaData(DATABASE) {
-  const result = await DATABASE.prepare('SELECT fileId, url FROM media').all();
+  const result = await DATABASE.prepare('SELECT url, fileId FROM media').all();
   const mediaData = result.results.map(row => {
     const timestamp = parseInt(row.url.split('/').pop().split('.')[0]);
-    return {
-      fileId: row.fileId,
-      url: row.url,
-      timestamp: timestamp
-    };
+    return { fileId: row.fileId, url: row.url, timestamp: timestamp };
   });
   mediaData.sort((a, b) => b.timestamp - a.timestamp);
-  return mediaData.map(({ fileId, url }) => ({
-    fileId,
-    url
-  }));
+  return mediaData.map(({ fileId, url }) => ({ fileId, url }));
 }
 
 async function handleUploadRequest(request, DATABASE, enableAuth, USERNAME, PASSWORD, domain, TG_BOT_TOKEN, TG_CHAT_ID) {
@@ -729,30 +722,21 @@ async function handleUploadRequest(request, DATABASE, enableAuth, USERNAME, PASS
     } else {
       uploadFormData.append("document", file);
     }
-    const telegramResponse = await fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument`, {
-      method: 'POST',
-      body: uploadFormData
-    });
+    const telegramResponse = await fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument`, { method: 'POST', body: uploadFormData });
     if (!telegramResponse.ok) {
       const errorData = await telegramResponse.json();
       throw new Error(errorData.description || '上传到 Telegram 失败');
     }
     const responseData = await telegramResponse.json();
-    if (responseData.result.video) {
-      fileId = responseData.result.video.file_id;
-    } else if (responseData.result.document) {
-      fileId = responseData.result.document.file_id;
-    } else {
-      throw new Error('返回的数据中没有文件 ID');
-    }
+    if (responseData.result.video) fileId = responseData.result.video.file_id;
+    else if (responseData.result.document) fileId = responseData.result.document.file_id;
+    else if (responseData.result.sticker) fileId = responseData.result.sticker.file_id;
+    else throw new Error('返回的数据中没有文件 ID');
     const fileExtension = file.name.split('.').pop();
     const timestamp = Date.now();
     const imageURL = `https://${domain}/${timestamp}.${fileExtension}`;
-    await DATABASE.prepare('INSERT OR IGNORE INTO media (fileId, url) VALUES (?, ?)').bind(fileId, imageURL).run();
-    return new Response(JSON.stringify({ data: imageURL }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' }
-    });
+    await DATABASE.prepare('INSERT INTO media (url, fileId) VALUES (?, ?) ON CONFLICT(url) DO NOTHING').bind(imageURL, fileId).run();
+    return new Response(JSON.stringify({ data: imageURL }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   } catch (error) {
     console.error('内部服务器错误:', error);
     return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
@@ -764,66 +748,60 @@ async function handleImageRequest(request, DATABASE, TG_BOT_TOKEN) {
   const cache = caches.default;
   const cacheKey = new Request(requestedUrl);
   const cachedResponse = await cache.match(cacheKey);
-  if (cachedResponse) {
-    return cachedResponse;
-  }
+  if (cachedResponse) return cachedResponse;
   const result = await DATABASE.prepare('SELECT fileId FROM media WHERE url = ?').bind(requestedUrl).first();
-  if (result) {
-    const fileId = result.fileId;
-    const getFileResponse = await fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/getFile?file_id=${fileId}`);
-    if (!getFileResponse.ok) {
-      return new Response(null, { status: 404 });
-    }
-    const fileData = await getFileResponse.json();
-    const filePath = fileData.result.file_path;
-    const telegramFileUrl = `https://api.telegram.org/file/bot${TG_BOT_TOKEN}/${filePath}`;
-    const response = await fetch(telegramFileUrl);
-    if (response.ok) {
-      const fileExtension = requestedUrl.split('.').pop().toLowerCase();
-      let contentType = 'text/plain';
-      if (fileExtension === 'jpg' || fileExtension === 'jpeg') {
-        contentType = 'image/jpeg';
-      } else if (fileExtension === 'png') {
-        contentType = 'image/png';
-      } else if (fileExtension === 'gif') {
-        contentType = 'image/gif';
-      } else if (fileExtension === 'mp4') {
-        contentType = 'video/mp4';
-      }
-      const headers = new Headers(response.headers);
-      headers.set('Content-Type', contentType);
-      headers.set('Content-Disposition', 'inline');
-      const responseToCache = new Response(response.body, { status: response.status, headers });
-      await cache.put(cacheKey, responseToCache.clone());
-      return responseToCache;
-    }
+  if (!result) {
+    return new Response('未匹配到url', { status: 404 });
   }
-  const notFoundResponse = new Response(null, { status: 404 });
-  await cache.put(cacheKey, notFoundResponse.clone());
-  return notFoundResponse;
+  const fileId = result.fileId;
+  let filePath;
+  let attempts = 0;
+  const maxAttempts = 3;
+  while (attempts < maxAttempts) {
+    const getFilePath = await fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/getFile?file_id=${fileId}`);
+    if (!getFilePath.ok) {
+      return new Response('请求文件路径失败', { status: 500 });
+    }
+    const fileData = await getFilePath.json();
+    if (fileData.ok && fileData.result.file_path) {
+      filePath = fileData.result.file_path;
+      break;
+    }
+    attempts++;
+  }
+  if (!filePath) {
+    return new Response('未找到文件路径', { status: 404 });
+  }
+  const getFileResponse = `https://api.telegram.org/file/bot${TG_BOT_TOKEN}/${filePath}`;
+  const response = await fetch(getFileResponse);
+  if (!response.ok) {
+    return new Response('获取文件内容失败', { status: 500 });
+  }
+  const fileExtension = requestedUrl.split('.').pop().toLowerCase();
+  let contentType = 'text/plain';
+  if (fileExtension === 'jpg' || fileExtension === 'jpeg') contentType = 'image/jpeg';
+  if (fileExtension === 'png') contentType = 'image/png';
+  if (fileExtension === 'gif') contentType = 'image/gif';
+  if (fileExtension === 'webp') contentType = 'image/webp';
+  if (fileExtension === 'mp4') contentType = 'video/mp4';
+  const headers = new Headers(response.headers);
+  headers.set('Content-Type', contentType);
+  headers.set('Content-Disposition', 'inline');
+  const responseToCache = new Response(response.body, { status: response.status, headers });
+  await cache.put(cacheKey, responseToCache.clone());
+  return responseToCache;
 }
 
 async function handleBingImagesRequest(request) {
   const cache = caches.default;
   const cacheKey = new Request('https://cn.bing.com/HPImageArchive.aspx?format=js&idx=0&n=5');
   const cachedResponse = await cache.match(cacheKey);
-  if (cachedResponse) {
-    return cachedResponse;
-  }
+  if (cachedResponse) return cachedResponse;
   const res = await fetch(cacheKey);
-  const bing_data = await res.json();
-  const images = bing_data.images.map(image => ({
-    url: `https://cn.bing.com${image.url}`
-  }));
-  const return_data = {
-    status: true,
-    message: "操作成功",
-    data: images
-  };
-  const response = new Response(JSON.stringify(return_data), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' }
-  });
+  const bingData = await res.json();
+  const images = bingData.images.map(image => ({ url: `https://cn.bing.com${image.url}` }));
+  const returnData = { status: true, message: "操作成功", data: images };
+  const response = new Response(JSON.stringify(returnData), { status: 200, headers: { 'Content-Type': 'application/json' } });
   await cache.put(cacheKey, response.clone());
   return response;
 }
@@ -834,19 +812,24 @@ async function handleDeleteImagesRequest(request, DATABASE) {
   }
   try {
     const keysToDelete = await request.json();
-    if (keysToDelete.length === 0) {
+    if (!Array.isArray(keysToDelete) || keysToDelete.length === 0) {
       return new Response(JSON.stringify({ message: '没有要删除的项' }), { status: 400 });
     }
     const placeholders = keysToDelete.map(() => '?').join(',');
-    await DATABASE.prepare(`DELETE FROM media WHERE url IN (${placeholders})`).bind(...keysToDelete).run();
+    const result = await DATABASE.prepare(`DELETE FROM media WHERE url IN (${placeholders})`).bind(...keysToDelete).run();
+    if (result.changes === 0) {
+      return new Response(JSON.stringify({ message: '未找到要删除的项' }), { status: 404 });
+    }
     const cache = caches.default;
     for (const url of keysToDelete) {
       const cacheKey = new Request(url);
-      await cache.delete(cacheKey);
+      const cachedResponse = await cache.match(cacheKey);
+      if (cachedResponse) {
+        await cache.delete(cacheKey);
+      }
     }
     return new Response(JSON.stringify({ message: '删除成功' }), { status: 200 });
   } catch (error) {
-    console.error('删除图片时出错:', error);
-    return new Response(JSON.stringify({ error: '删除失败' }), { status: 500 });
+    return new Response(JSON.stringify({ error: '删除失败', details: error.message }), { status: 500 });
   }
 }
